@@ -28,7 +28,7 @@ class PlaceComponent extends StatefulWidget {
   final PagedLoaderCallback<FeedbackUiModel> placeFeedbackLoaderCallback;
   final PagedLoaderCallback<FeedbackUiModel> eventFeedbackLoaderCallback;
   final ValueChanged<VideoReactionUiModel>? onReactionTap;
-  final Future<bool> Function(FeedbackUiModel)? onFeedbackTap;
+  final Future<EditReviewModel> Function(FeedbackUiModel)? onFeedbackTap;
   final Future<bool> Function()? onAddFeedbackTapped;
   final Future<bool> Function(int placeId) canLeaveFeedbackCallback;
   final Future<bool> Function(int eventId) canLeaveFeedbackForEventCallback;
@@ -44,6 +44,7 @@ class PlaceComponent extends StatefulWidget {
   final ValueNotifier<String?>? translateDescription;
   final ValueNotifier<bool>? showTranslateButton;
   final int? currentUserId;
+  final Set<int>? likedReviews;
 
   const PlaceComponent({
     super.key,
@@ -78,6 +79,7 @@ class PlaceComponent extends StatefulWidget {
     this.translateDescription,
     this.showTranslateButton,
     this.currentUserId,
+    this.likedReviews,
   });
 
   @override
@@ -89,7 +91,7 @@ class _PlaceComponentState extends State<PlaceComponent> {
 
   final feedbacksPagedController = PagingController<int, FeedbackUiModel>(firstPageKey: 1);
 
-  Set<int> likedReviews = {};
+  // Set<int> likedReviews = {};
 
   final ScrollController listViewController = ScrollController();
 
@@ -152,7 +154,7 @@ class _PlaceComponentState extends State<PlaceComponent> {
   void _feedbacksListener(int page) async {
     final data = await widget.placeFeedbackLoaderCallback(page, widget.place.id);
     if (data.any((e) => feedbacksPagedController.itemList?.any((el) => el.id == e.id) ?? false)) return;
-    likedReviews.addAll(data.where((e) => e.helpfulForUser ?? false).map((e) => e.id));
+    widget.likedReviews?.addAll(data.where((e) => e.helpfulForUser ?? false).map((e) => e.id));
     if (data.isEmpty) {
       feedbacksPagedController.appendLastPage(data);
       return;
@@ -631,7 +633,7 @@ class _PlaceComponentState extends State<PlaceComponent> {
                   style: boldTextTheme?.body,
                 ),
                 color: colorScheme?.surface1,
-                contentHeight: _noFeedbacks ? 0 : (isSmallScreen ? 166.8.h: 0.28.sh),
+                contentHeight: _noFeedbacks ? 0 : (isSmallScreen ? 166.8.h : 0.28.sh),
                 action: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 250),
                   child: canLeaveFeedback ?? false
@@ -689,11 +691,24 @@ class _PlaceComponentState extends State<PlaceComponent> {
                               onPressed: () async {
                                 if (widget.onFeedbackTap != null) {
                                   await widget.onFeedbackTap?.call(feedback).then(
-                                    (isEdited) {
-                                      if (isEdited) {
+                                    (model) {
+                                      if (model.isEdited) {
                                         feedbacksPagedController.refresh();
                                         feedbacksPagedController.notifyPageRequestListeners(1);
                                       }
+                                      final feedbackId = feedback.id;
+
+                                      if ((model.countToUpdate ?? 0) > 0) {
+                                        widget.likedReviews?.add(feedbackId);
+                                        widget.onLikedFeedback?.call(feedbackId);
+                                        _updateFeedbackList(feedbackId, 1);
+                                      } else if ((model.countToUpdate ?? 0) < 0) {
+                                        widget.likedReviews?.remove(feedbackId);
+                                        widget.onDislikedFeedback?.call(feedbackId);
+                                        _updateFeedbackList(feedbackId, -1);
+                                      }
+
+                                      setState(() {});
                                     },
                                   );
                                 } else {
@@ -704,12 +719,12 @@ class _PlaceComponentState extends State<PlaceComponent> {
                                   ? null
                                   : () {
                                       final feedbackId = feedback.id;
-                                      if (likedReviews.contains(feedbackId)) {
-                                        likedReviews.remove(feedbackId);
+                                      if (widget.likedReviews != null && widget.likedReviews!.contains(feedbackId)) {
+                                        widget.likedReviews?.remove(feedbackId);
                                         widget.onDislikedFeedback?.call(feedbackId);
                                         _updateFeedbackList(feedbackId, -1);
                                       } else {
-                                        likedReviews.add(feedbackId);
+                                        widget.likedReviews?.add(feedbackId);
                                         widget.onLikedFeedback?.call(feedbackId);
                                         _updateFeedbackList(feedbackId, 1);
                                       }
@@ -756,5 +771,25 @@ class _PlaceComponentState extends State<PlaceComponent> {
         (kBottomNavigationBarHeight * 1.5).heightBox,
       ],
     ).paddingSymmetric(vertical: verticalMargin);
+  }
+}
+
+class EditReviewModel {
+  final bool isEdited;
+  final int? countToUpdate;
+
+  EditReviewModel({
+    required this.isEdited,
+    this.countToUpdate,
+  });
+
+  EditReviewModel copyWith({
+    bool? isEdited,
+    int? countToUpdate,
+  }) {
+    return EditReviewModel(
+      isEdited: isEdited ?? this.isEdited,
+      countToUpdate: countToUpdate ?? this.countToUpdate,
+    );
   }
 }
